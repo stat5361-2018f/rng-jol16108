@@ -1,0 +1,298 @@
+---
+title: "HW6 - Exercise6"
+author: JooChul Lee
+date: "`r format(Sys.time(), '%d %B %Y')`"
+documentclass: article
+knit: "bookdown::render_book('Exercise2.Rmd', 'bookdown::pdf_document2')"
+fontsize: 11pt
+papersize: letter
+header-includes:
+   - \usepackage{algorithm}
+   - \usepackage{algpseudocode}
+---
+
+```{r setup, echo = FALSE, message = FALSE, warning = FALSE}
+## for latex and html output
+isHtml <- knitr::is_html_output()
+isLatex <- knitr::is_latex_output()
+latex <- ifelse(isLatex, '\\LaTeX\\', 'LaTeX')
+
+## specify global chunk options
+knitr::opts_chunk$set(fig.width = 5, fig.height = 4, dpi = 300,
+                      out.width = "90%", fig.align = "center")
+
+```
+
+# Rejection sampling
+
+## Find the value of the normalizing constant. Show that $g$ is a mixture of Gamma distributions. Identify the component distributions and their weights in the mixture.
+  \begin{align}
+    C\int_0^\infty (2 x^{\theta-1} +  x^{\theta-1/2}) e^{-x} dx 
+    &= C (\int_0^\infty 2 x^{\theta-1} e^{-x} dx + \int_0^\infty x^{\theta-1/2} e^{-x} dx)\\
+    &= C (2 \Gamma(\theta)  + \Gamma(\theta + \frac{1}{2})) \\
+    &=1
+  \end{align}
+ 
+Thus, $C = \dfrac{1}{2 \Gamma(\theta)  + \Gamma(\theta + \frac{1}{2})}$
+
+Then, we know that
+$$ g(x) =\dfrac{2\Gamma(\theta)}{2 \Gamma(\theta)  + \Gamma(\theta + \frac{1}{2})} Gamma(\theta,1) + \dfrac{\Gamma(\theta + \frac{1}{2})}{2 \Gamma(\theta)  + \Gamma(\theta + \frac{1}{2})} Gamma(\theta + \frac{1}{2},1)$$
+which is the mixture gamma distribution. The component distributions are $Gamma(\theta,1)$ and $Gamma(\theta + \frac{1}{2},1)$. The weights are $\dfrac{2\Gamma(\theta)}{2 \Gamma(\theta)  + \Gamma(\theta + \frac{1}{2})}$ and $\dfrac{\Gamma(\theta + \frac{1}{2})}{2 \Gamma(\theta)  + \Gamma(\theta + \frac{1}{2})}$.
+\newpage
+
+## Design a procedure (pseudo-code) to sample from $g$; implement it in an R function
+
+\begin{algorithm}
+\caption{procedure to sample from $g$}
+\begin{algorithmic}[1]
+\Function{}{n, $\theta$}
+\Comment{n : sample size, $\theta$ : parameter}
+\State u : Draw samples with size n from standard uniform distribution
+\For{i in 1:n} \Comment{Loop by data size}
+\If{$u < \dfrac{2\Gamma(\theta)}{2 \Gamma(\theta)  + \Gamma(\theta + \frac{1}{2})}$}
+\State $x_i$ : Draw a sample from $Gamma(\theta,1)$
+\Else
+\State $x_i$ : Draw a sample from $Gamma(\theta + \frac{1}{2},1)$
+\EndIf
+\EndFor
+   \State \textbf{return} $x$ : sample with size n 
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+```{r}
+sampling = function(n, theta)
+{
+   u = runif(n)
+   Num = sum( u < 2*gamma(theta)/( 2*gamma(theta) + gamma(theta + 0.5) ) )
+   sample = c(rgamma(Num, theta, 1), rgamma(n-Num, theta+0.5, 1))
+   return(sample)
+}
+theta = 1
+integrand = function(x)
+{
+   sqrt(4+x)*x^(theta-1)*exp(-x)
+}
+integral = integrate(integrand, 0, Inf)
+aa = sampling(10000, theta)
+hist(aa,freq=F,ylim = c(0,0.7),xlab='',main='')
+lines(density(aa),col="red",lwd=4)
+curve(sqrt(4+x)*x^(theta-1)*exp(-x)/as.numeric(integral[1]), add = T,col="blue",lwd=2)
+legend('topright', legend=c("Simulated","Actual"),lty=c(1,1),
+       lwd=c(2.5,2.5),col=c('red','blue'))
+```
+The figure is the result of $\theta=1$ and n=10000.
+
+## Design a procedure (pseudo-code) to use rejection sampling to sample from $f$ using $g$ as the instrumental distribution.
+
+First of all, we need to choose $\alpha$ such that 
+$$q(x) \le \alpha g(x)$$
+where $q(x) = \sqrt{4+x}x^{\theta -1}e^{-x}$
+
+Since $\sqrt{4+x} \le \sqrt{4} + \sqrt{x}$,
+$$q(x) = \sqrt{4+x}x^{\theta -1}e^{-x} \le (2 x^{\theta-1} +  x^{\theta-1/2}) e^{-x}= \frac{1}{C} g(x)$$
+Then, $\alpha$ could be $\frac{1}{C} = 2 \Gamma(\theta)  + \Gamma(\theta + \frac{1}{2})$
+
+Thus, we can choose $\alpha = \frac{1}{C}$ which satisfies the condition $q(x) \le \alpha g(x)$.
+
+\begin{algorithm}
+\caption{procedure to sample from $f$}
+\begin{algorithmic}[1]
+\Function{}{n, $\theta$}
+\Comment{n : sample size, $\theta$ : parameter}
+\State u : Draw one sample from standard uniform distribution
+\State x : Draw one sample from mixture dist. based on $g(x)$
+\If{$u > \dfrac{q(x)}{\alpha g(x)}$}
+\State Go step 2-3
+\Else
+\State return x
+\EndIf
+\State Repeat the steps until x's size is n
+   \State \textbf{return} $x$ : sample with size n 
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+```{r}
+sampling = function(n, theta)
+{
+   u = runif(n)
+   Num = sum( u < 2*gamma(theta)/( 2*gamma(theta) + gamma(theta + 0.5) ) )
+   sample = c(rgamma(Num, theta, 1), rgamma(n-Num, theta+0.5, 1))
+   return(sample)
+}
+algorithm2 = function(n, theta)
+{
+   sample = c()
+   while( length(sample) <= n )
+   {
+      u = runif(1); x = sampling(1, theta)
+      if(u <= sqrt( x + 4)/(sqrt(x)))
+         sample= c(sample, x)
+   }
+   return(sample)
+}
+theta = 1
+integrand = function(x)
+{
+   sqrt(4+x)*x^(theta-1)*exp(-x)
+}
+integral = integrate(integrand, 0, Inf)
+aa = algorithm2(10000, theta)
+hist(aa,freq=F,ylim = c(0,0.7),xlab='',main='')
+lines(density(aa),col="red",lwd=4)
+curve(sqrt(4+x)*x^(theta-1)*exp(-x)/as.numeric(integral[1]),add = T,col="blue",lwd=2)
+legend('topright', legend=c("Simulated","Actual"),lty=c(1,1),
+       lwd=c(2.5,2.5),col=c('red','blue'))
+```
+The figure is the result of $\theta=1$ and n=10000.
+
+# Mixture Proposal
+
+## Design a procedure (pseudo-code) to sample from $f$ using a mixture of Beta distributions as the instrumental density.
+
+First of all, we know that
+
+$$\frac{x^{\theta-1}}{1+x^2} + \sqrt{2+x^2}(1-x)^{\beta-1} \le x^{\theta-1} + 2(1-x)^{\beta-1}$$
+Denote that $q(x) = \frac{x^{\theta-1}}{1+x^2} + \sqrt{2+x^2}(1-x)^{\beta-1}$ and $g(x) \propto x^{\theta-1} + 2(1-x)^{\beta-1}$
+
+Then, 
+
+$g(x) = \frac{\bold{B}(\theta,1)}{\bold{B}(\theta,1)+2\bold{B}(1,\beta)} Beta(\theta,1) + \frac{2\bold{B}(1,\beta)}{\bold{B}(\theta,1)+2\bold{B}(1,\beta)}Beta(1,\beta)$
+Thus, we get that
+$$p_1 = \frac{\bold{B}(\theta,1)}{\bold{B}(\theta,1)+2\bold{B}(1,\beta)}$$
+$$p_2 = \frac{2\bold{B}(1,\beta)}{\bold{B}(\theta,1)+2\bold{B}(1,\beta)}$$
+
+$$g_1 = Beta(\theta,1)$$
+$$g_2 = Beta(1,\beta)$$
+Let $\alpha = \bold{B}(\theta,1)+2\bold{B}(1,\beta)$.
+
+Then, $$q(x) \le \alpha g(x)$$
+
+\begin{algorithm}
+\caption{procedure to sample from $f$}
+\begin{algorithmic}[1]
+\Function{}{n, $\theta$}
+\Comment{n : sample size, $\theta$ : parameter}
+\State u : Draw one sample from standard uniform distribution
+\State x : Draw one sample from mixture dist. based on $g(x)$
+\If{$u > \dfrac{q(x)}{\alpha g(x)}$}
+\State Go step 2-3
+\Else
+\State return x
+\EndIf
+\State Repeat the steps until x's size is n
+   \State \textbf{return} $x$ : sample with size n 
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+```{r}
+sampling1 = function(n, theta, beta)
+{
+   u = runif(n)
+   Num = sum( u < beta(theta, 1)/( 2*beta(1, beta) + beta(theta, 1) ) )
+   sample = c(rbeta(Num, theta, 1), rbeta(n-Num, 1, beta))
+   return(sample)
+}
+algorithm3 = function(n, theta, beta)
+{
+   sample = c()
+   while( length(sample) <= n )
+   {
+      u = runif(1); x = sampling1(1, theta, beta)
+      q = (x^(theta - 1)/(1+x^2)) + sqrt(2+x^2)*(1-x)^(beta-1)
+      g = x^(theta -1) + 2*(1-x)^(beta-1)
+      if(u <= q/g)
+         sample= c(sample, x)
+   }
+   return(sample)
+}
+theta = 5; beta = 10
+integrand = function(x)
+{
+   (x^(theta - 1)/(1+x^2)) + sqrt(2+x^2)*(1-x)^(beta-1)
+}
+integral = integrate(integrand, 0, 1)
+aa = algorithm3(10000, theta, beta)
+hist(aa,freq=F,xlab='',main='')
+lines(density(aa),col="red",lwd=4)
+curve( ((x^(theta - 1)/(1+x^2)) + sqrt(2+x^2)*(1-x)^(beta-1))/as.numeric(integral[1]),
+       add = T,col="blue",lwd=2)
+legend('topright', legend=c("Simulated","Actual"),lty=c(1,1),
+       lwd=c(2.5,2.5),col=c('red','blue'))
+```
+The figure is the result of $(\theta=5, \beta=10)$ and n=10000.
+
+## Design a procedure (pseudo-code) to do this; implement it with an R function.
+
+$$\frac{x^{\theta-1}}{1+x^2}, \quad \sqrt{2+x^2}(1-x)^{\beta-1}$$
+
+We can see that
+$$\frac{x^{\theta-1}}{1+x^2} \le x^{\theta-1}$$
+$$\sqrt{2+x^2}(1-x)^{\beta-1} \le 2(1-x)^{\beta-1}$$
+
+Then,
+$$q_1 = \frac{x^{\theta-1}}{1+x^2},\; g_1 =Beta(\theta,1),\; \alpha_1 = \bold{B}(\theta,1) $$
+$$q_2 = \sqrt{2+x^2}(1-x)^{\beta-1},\; g_2 = Beta(1,\beta),\; \alpha_2 = 2\bold{B}(1,\beta) $$
+
+\begin{algorithm}
+\caption{procedure to sample from $f$}
+\begin{algorithmic}[1]
+\Function{}{n, $\theta$}
+\Comment{n : sample size, $\theta$ : parameter}
+\State Sample k from \{1,2\}
+\State u : Draw one sample from standard uniform distribution
+\State x : Draw one sample from dist. based on $g(x)_k$
+\If{$u > \dfrac{q_k(x)}{\alpha_k g_k(x)}$}
+\State Go step 2-3
+\Else
+\State return x
+\EndIf
+\State Repeat the steps until x's size is n
+   \State \textbf{return} $x$ : sample with size n 
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+```{r}
+algorithm4 = function(n, theta, beta)
+{
+   sample = c()
+   while( length(sample) <= n )
+   {
+      k =sample(1:2,1)
+      u = runif(1); 
+      if(k == 1)
+      {   
+         x = rbeta(1,theta, 1)
+         q = (x^(theta - 1)/(1+x^2))
+         g = x^(theta -1) 
+         if(u <= q/g)
+            sample= c(sample, x)
+      }   
+      else {
+         x = rbeta(1, 1, beta)
+         q = sqrt(2+x^2)*(1-x)^(beta-1)
+         g = 2*(1-x)^(beta-1)
+         if(u <= q/g)
+            sample= c(sample, x)
+         }
+   }
+   return(sample)
+}
+theta = 5; beta = 10
+integrand = function(x)
+{
+   (x^(theta - 1)/(1+x^2)) + sqrt(2+x^2)*(1-x)^(beta-1)
+}
+integral = integrate(integrand, 0, 1)
+aa = algorithm4(10000, theta, beta)
+hist(aa,freq=F,xlab='',main='')
+lines(density(aa),col="red",lwd=4)
+curve( ((x^(theta - 1)/(1+x^2)) + sqrt(2+x^2)*(1-x)^(beta-1))/as.numeric(integral[1]),
+       add = T,col="blue",lwd=2)
+legend('topright', legend=c("Simulated","Actual"),lty=c(1,1),
+       lwd=c(2.5,2.5),col=c('red','blue'))
+```
+The figure is the result of $(\theta=5, \beta=10)$ and n=10000.
